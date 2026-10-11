@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Windows 存储分析报告</title>
+<style>
+  :root{
+    --bg:#f0f2f5; --card:#ffffff; --ink:#1a1a2e; --sub:#8c8c9a;
+    --line:#e8e8ed; --green:#10b981; --yellow:#f59e0b; --red:#ef4444;
+    --green-bg:#ecfdf5; --yellow-bg:#fffbeb; --red-bg:#fef2f2;
+    --accent:#3b82f6; --accent-bg:#eff6ff;
+    --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.06),0 6px 16px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.6;padding:28px 20px 80px;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto}
+  header{margin-bottom:24px;display:flex;align-items:center;gap:12px}
+  h1{font-size:24px;font-weight:700;letter-spacing:-.3px}
+  h1 .icon{font-size:28px}
+  .meta{color:var(--sub);font-size:13px;margin-top:4px}
+
+  /* 磁盘总览卡片 */
+  .overview{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+    padding:24px;margin-bottom:24px}
+  .bar{height:18px;border-radius:9px;background:var(--line);overflow:hidden;display:flex;margin:16px 0 12px}
+  .bar i{display:block;height:100%}
+  .bar .used{background:linear-gradient(90deg,#3b82f6,#60a5fa)}
+  .bar i.seg-green{background:var(--green)}
+  .bar i.seg-yellow{background:var(--yellow)}
+  .bar i.seg-red{background:var(--red)}
+  .bar i.seg-blue{background:var(--accent)}
+  .bar i+i{border-left:1.5px solid #fff}
+  .lead{font-size:14px;line-height:1.7;margin-bottom:12px}
+  .stats{display:flex;flex-wrap:wrap;gap:24px}
+  .stat .k{font-size:12px;color:var(--sub)}
+  .stat .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .sysgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:10px 24px;margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+  .sysgrid div{font-size:13px}
+  .sysgrid span{color:var(--sub)}
+  .pills{margin:14px 0 0}
+  .bar-label{font-size:12px;color:var(--sub);margin-bottom:4px}
+  .other-disks{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .other-disks .label{font-size:12px;color:var(--sub);font-weight:600;margin-bottom:8px}
+  .odisk{display:flex;align-items:center;gap:12px;margin:6px 0;font-size:13px}
+  .odisk-name{width:46px;font-weight:600;font-variant-numeric:tabular-nums}
+  .obar{flex:1;height:10px;border-radius:6px;background:var(--line);overflow:hidden}
+  .obar i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#60a5fa)}
+  .odisk-num{color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* 通用段落 */
+  .sec{margin-bottom:28px}
+  .sec h2{font-size:18px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .sec h2 .count{font-size:13px;color:var(--sub);font-weight:500}
+  .sec-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .sec-actions .del-btn{padding:5px 12px;font-size:12px}
+  .sec-status{font-size:12px}
+
+  /* Top5 表格 */
+  table{width:100%;border-collapse:collapse;background:var(--card);
+    border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+  th,td{text-align:left;padding:12px 14px;font-size:13px;border-bottom:1px solid var(--line)}
+  th{background:#f8f9fb;color:var(--sub);font-weight:600;font-size:12px;white-space:nowrap}
+  td.type{white-space:nowrap}
+  .table-scroll{overflow-x:auto;border-radius:var(--radius);box-shadow:var(--shadow)}
+  .table-scroll table{min-width:720px;box-shadow:none}
+  tr:last-child td{border-bottom:none}
+  td.size{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td.path{font-family:"Cascadia Code","Consolas",monospace;font-size:12px;color:var(--sub);word-break:break-all}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%}
+  .dot.green{background:var(--green)} .dot.yellow{background:var(--yellow)} .dot.red{background:var(--red)} .dot.blue{background:var(--accent)}
+
+  /* 卡片 */
+  .item{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+    margin-bottom:12px;border-left:4px solid var(--line);overflow:hidden}
+  .item.green{border-left-color:var(--green)}
+  .item.yellow{border-left-color:var(--yellow)}
+  .item.red{border-left-color:var(--red)}
+  .item-head{display:flex;align-items:center;gap:12px;padding:16px 18px;cursor:pointer;user-select:none}
+  .item-head:hover{background:#f8f9fb}
+  .item-name{font-weight:600;font-size:15px;flex:1}
+  .item-badge{font-size:12px;font-weight:600;color:var(--green);background:var(--green-bg);
+    padding:2px 10px;border-radius:20px;white-space:nowrap}
+  .item-badge:empty{display:none}
+  .item.cleaned .item-name{text-decoration:line-through;color:var(--sub);font-weight:500}
+  .item.cleaned .item-size{color:var(--sub)}
+  .item.cleaned{opacity:.85}
+  .item-size{font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .chev{color:var(--sub);transition:transform .2s;font-size:12px}
+  .item.open .chev{transform:rotate(90deg)}
+  .item-body{display:none;padding:0 18px 18px;font-size:14px}
+  .item.open .item-body{display:block}
+  .item-path{font-family:"Cascadia Code","Consolas",monospace;font-size:12px;color:var(--sub);
+    word-break:break-all;margin-bottom:12px;padding:8px 10px;background:#f8f9fb;border-radius:8px}
+  .field{margin:10px 0}
+  .field .label{font-size:12px;color:var(--sub);font-weight:600;margin-bottom:3px}
+  .tag{display:inline-block;background:var(--accent-bg);color:var(--accent);
+    font-size:12px;padding:2px 8px;border-radius:6px;margin:2px 4px 2px 0}
+  .risk{background:var(--red-bg);color:var(--red);padding:8px 12px;border-radius:8px;
+    font-size:13px;margin-top:10px}
+
+  /* 命令块 */
+  .cmd{position:relative;background:#1e293b;color:#e2e8f0;border-radius:8px;
+    padding:14px;margin:8px 0;font-family:"Cascadia Code","Consolas",monospace;
+    font-size:12.5px;line-height:1.7;overflow-x:auto;white-space:pre}
+  .cmd .copy{position:absolute;top:8px;right:8px;background:#334155;color:#cbd5e1;
+    border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit}
+  .cmd .copy:hover{background:#475569;color:#fff}
+  .cmd .copy.done{background:var(--green);color:#fff}
+  .cmd-label{font-size:11px;color:var(--sub);margin:10px 0 2px}
+
+  /* 操作按钮 */
+  .del-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px}
+  .del-btn{border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;
+    transition:all .15s}
+  .del-btn.trash{background:var(--accent-bg);color:var(--accent)}
+  .del-btn.trash:hover{background:#dbeafe}
+  .del-btn.danger{background:var(--red-bg);color:var(--red)}
+  .del-btn.danger:hover{background:#fecaca}
+  .del-btn.open{background:#f1f5f9;color:var(--ink)}
+  .del-btn.open:hover{background:#e2e8f0}
+  .del-btn:disabled{opacity:.45;cursor:default}
+  .del-status{font-size:13px}
+  .del-status.ok{color:var(--green);font-weight:600}
+  .del-status.err{color:var(--red)}
+  .del-note{font-size:12px;color:var(--sub);line-height:1.6;margin-top:8px}
+  .del-note b{color:var(--ink)}
+
+  /* 摘要 */
+  .summary{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px}
+  .summary.warn{background:#fffbeb;border-left:4px solid #f59e0b}
+  .summary.warn li{color:#78350f}
+  .summary.warn h2{color:#92400e}
+  .time-facts{display:flex;gap:28px;background:#f8fafc;border-radius:8px;padding:12px 16px;margin-bottom:4px}
+  .time-facts .label{font-size:12px;color:var(--sub);margin-bottom:2px}
+  .time-facts>div{flex:1}
+  .fl{margin:10px 0}
+  .fl-ctrl{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;align-items:center}
+  .fl-btn{padding:5px 12px;font-size:12px;border:1px solid var(--line);background:#f8fafc;
+    border-radius:6px;cursor:pointer;color:var(--ink)}
+  .fl-btn:hover{background:#e2e8f0}
+  .fl-btn.danger{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .fl-btn.danger:hover{background:#fee2e2}
+  .fl-btn:disabled{opacity:.5;cursor:not-allowed}
+  .fl-list{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fcfcfd}
+  .fl-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f1f5f9}
+  .fl-row:last-child{border-bottom:none}
+  .fl-row.picked{background:#eff6ff}
+  .fl-row.cleaned{opacity:.5}
+  .fl-row.cleaned .fl-path{text-decoration:line-through}
+  .fl-main{flex:1;min-width:0}
+  .fl-path{font-family:"Cascadia Code","Consolas",monospace;font-size:12px;color:#0f172a;
+    word-break:break-all;line-height:1.5}
+  .fl-meta{font-size:11px;color:var(--sub);margin-top:2px}
+  .fl-check{font-size:11px;color:var(--sub);white-space:nowrap;display:flex;align-items:center;gap:4px;cursor:pointer}
+  .fl-done{color:#16a34a;font-size:11px}
+  .dup-group{border-bottom:1px solid var(--line)}
+  .dup-group:last-child{border-bottom:none}
+  .dup-head{padding:7px 10px;background:#f8fafc;font-size:12px;font-weight:600;color:#334155;
+    position:sticky;top:0;z-index:1}
+  .del-status.fl-status{margin-left:8px;font-size:12px}
+
+  .summary h3{font-size:15px;margin:18px 0 8px} .summary h3:first-child{margin-top:0}
+  .summary ul{padding-left:20px} .summary li{margin:4px 0;font-size:14px}
+  .pill{display:inline-flex;align-items:center;gap:6px;background:#f8f9fb;border:1px solid var(--line);
+    border-radius:20px;padding:6px 14px;font-size:13px;margin:4px 8px 4px 0;font-weight:600}
+  .pill b{font-variant-numeric:tabular-nums}
+
+  .note{font-size:12px;color:var(--sub);margin-top:8px}
+  .denied{background:var(--yellow-bg);border:1px solid #fcd34d;border-radius:10px;
+    padding:12px 14px;font-size:13px;margin-top:12px}
+  footer{text-align:center;color:var(--sub);font-size:12px;margin-top:40px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="icon">💾</span> <span id="diskTitle">Windows 存储分析报告</span></h1>
+  </header>
+  <div class="meta" id="meta"></div>
+  <div id="app"></div>
+  <footer>windows-disk-cleanup · 只读分析 · 删除命令请自行确认后执行 · 基于 storage-analyzer 架构</footer>
+</div>
+<script>
+const DATA = __REPORT_DATA__;
+const DELETE = __DELETE_CONFIG__;
+const FM = '资源管理器';
+
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cleanSize = s => String(s==null?'':s).replace(/[（(]\s*估算[^）)]*[）)]/g, '').trim();
+
+function copyBtn(text){
+  return `<button class="copy" data-cmd="${btoa(unescape(encodeURIComponent(text)))}">复制</button>`;
+}
+function cmdBlock(c){
+  const label = c.label ? `<div class="cmd-label">${esc(c.label)}</div>` : '';
+  return `${label}<div class="cmd">${copyBtn(c.cmd)}${esc(c.cmd)}</div>`;
+}
+function parseGB(str){
+  if(!str) return 0;
+  const m=String(str).match(/([\d.]+)\s*(TB|GB|MB)?/i);
+  if(!m) return 0;
+  let v=parseFloat(m[1]); const u=(m[2]||'GB').toUpperCase();
+  if(u==='TB') v*=1024; else if(u==='MB') v/=1024;
+  return v;
+}
+
+function renderSystem(s, sm){
+  document.getElementById('meta').textContent =
+    `生成于 ${DATA.generated_at} · 扫描耗时 ${DATA.scan_seconds||'?'}s`;
+  const total = parseGB(s.disk_total) || 1;
+  const used = parseGB(s.disk_used);
+  const ts = sm && sm.tier_stats;
+  const g = ts ? parseGB(ts.green) : 0;
+  const y = ts ? parseGB(ts.yellow) : 0;
+  const r = ts ? parseGB(ts.red) : 0;
+  const other = Math.max(0, used - g - y - r);
+  let bar;
+  if(g > 0 || y > 0 || r > 0){
+    const seg=(v,cls,label)=> v>0?`<i class="${cls}" style="width:${(v/total*100).toFixed(2)}%" title="${label}：约 ${v.toFixed(1)} GB"></i>`:'';
+    bar = seg(g,'seg-green','可自动清')+seg(y,'seg-yellow','需手动')+seg(r,'seg-red','谨慎清理')+seg(other,'seg-blue','系统及其他');
+  } else {
+    bar = `<i class="used" style="width:${(used/total*100).toFixed(2)}%"></i>`;
+  }
+  const fmtGB = v => v>0?`约 ${v.toFixed(1)} GB`:'-';
+  const otherPill = other>0?`<span class="pill"><span class="dot blue"></span>系统及其他 <b>${fmtGB(other)}</b></span>`:'';
+  let pills='';
+  if(sm && sm.tier_stats){
+    pills=`<div class="pills">
+      <span class="pill"><span class="dot green"></span>可自动清 <b>${fmtGB(g)}</b></span>
+      <span class="pill"><span class="dot yellow"></span>需手动 <b>${fmtGB(y)}</b></span>
+      <span class="pill"><span class="dot red"></span>谨慎清理 <b>${fmtGB(r)}</b></span>
+      ${otherPill}
+    </div>`;
+  }
+  const allDisks = s.disks || [];
+  const others = allDisks.filter(d => d.name !== s.disk_name);
+  const barLabel = allDisks.length > 1
+    ? `<div class="bar-label">系统盘 ${esc(s.disk_name||'')} · 已用部分按清理分级着色</div>` : '';
+  const otherDisksBlock = others.length ? `<div class="other-disks">
+      <div class="label">其他磁盘</div>
+      ${others.map(d=>{
+        const u=parseGB(d.used), t=parseGB(d.total)||1;
+        const pct=Math.min(100, u/t*100).toFixed(1);
+        return `<div class="odisk"><span class="odisk-name">${esc(d.name)}</span>
+          <div class="obar"><i style="width:${pct}%"></i></div>
+          <span class="odisk-num">${esc(d.used)} / ${esc(d.total)}</span></div>`;
+      }).join('')}</div>` : '';
+  return `<div class="overview">
+    <div class="stats">
+      <div class="stat"><div class="k">总容量</div><div class="v">${esc(s.disk_total)}</div></div>
+      <div class="stat"><div class="k">已用</div><div class="v">${esc(s.disk_used)}</div></div>
+      <div class="stat"><div class="k">可用</div><div class="v">${esc(s.disk_free)}</div></div>
+    </div>
+    ${barLabel}
+    <div class="bar">${bar}</div>
+    ${pills}
+    ${otherDisksBlock}
+    <div class="sysgrid">
+      <div><span>系统 </span>${esc(s.os)} (${esc(s.build)})</div>
+      <div><span>架构 </span>${esc(s.arch)}</div>
+      <div><span>文件系统 </span>${esc(s.filesystem)}</div>
+      <div><span>用户 </span>${esc(s.user)}</div>
+      <div><span>主目录 </span>${esc(s.home)}</div>
+    </div>
+  </div>`;
+}
+
+function renderTop5(rows){
+  if(!rows||!rows.length) return '';
+  const body = rows.map(r=>`<tr>
+    <td>${esc(r.rank)}</td>
+    <td><span class="dot ${esc(r.tier)}"></span></td>
+    <td class="size">${esc(cleanSize(r.size))}</td>
+    <td class="type">${esc(r.type)}</td>
+    <td><b>${esc(r.name)}</b></td>
+    <td class="path">${esc(r.path)}</td>
+    <td>${esc(r.note)}</td>
+  </tr>`).join('');
+  return `<div class="sec"><h2>占用排行 Top 5</h2>
+    <div class="table-scroll"><table><thead><tr><th>#</th><th>级</th><th>大小</th><th>类型</th><th>项目</th><th>路径</th><th>说明</th></tr></thead>
+    <tbody>${body}</tbody></table></div></div>`;
+}
+
+function renderGreen(items){
+  if(!items||!items.length) return '';
+  const cards = items.map(it=>{
+    const procs=(it.kill_processes&&it.kill_processes.length)
+      ? `<div class="field"><div class="label">清理前需关闭</div>${it.kill_processes.map(p=>`<span class="tag">${esc(p)}</span>`).join('')}</div>`
+      : `<div class="field"><div class="label">清理前需关闭</div><span class="note">无需关闭任何进程</span></div>`;
+    const cmds=(it.commands||[]).map(cmdBlock).join('');
+    return card('green', it.name, it.size_estimate, it.path,
+      procs + timeFacts(it) + fileList(it)
+      + `<div class="field"><div class="label">清理命令（自行确认后执行）</div>${cmds}</div>`
+      + delBlock(it));
+  }).join('');
+  return section('🟢 可自动清理（纯缓存/临时文件，可再生）', items.length, cards, greenBatchActions(items));
+}
+
+function greenBatchActions(items){
+  if(!DELETE) return '';
+  if(!items.some(it => it.trash_paths && it.trash_paths.length)) return '';
+  // 非系统盘：同样不渲染「全部删除」
+  const nonSys = !!(DATA && DATA.non_system_drive);
+  const rmBtn = nonSys ? '' : '<button class="del-btn danger" onclick="doBatch(this,\'rm\')">全部删除</button>';
+  return `<span class="sec-actions">
+    <button class="del-btn trash" onclick="doBatch(this,'trash')">全部移回收站</button>
+    ${rmBtn}
+    <span class="del-status sec-status"></span>
+  </span>`;
+}
+
+function doBatch(btn, mode){
+  const secActions = btn.closest('.sec-actions');
+  const sec = btn.closest('.sec');
+  const status = secActions.querySelector('.del-status');
+  const wraps = [...sec.querySelectorAll('.item.green .del-actions')]
+    .filter(w => !w.closest('.item').classList.contains('cleaned'));
+  if(!wraps.length){ status.textContent='没有可清理的项了'; status.className='del-status sec-status'; return; }
+  const allPaths=[]; let gb=0;
+  wraps.forEach(w=>{
+    JSON.parse(decodeURIComponent(escape(atob(w.dataset.paths)))).forEach(p=>allPaths.push(p));
+    const sz=w.closest('.item').querySelector('.item-size'); if(sz) gb+=parseGB(sz.textContent);
+  });
+  const verb = mode==='rm' ? '直接删除（不可恢复）' : '移到回收站（可逆，清空后释放）';
+  const sizeStr = gb>0 ? `，约 ${gb.toFixed(1)} GB` : '';
+  if(!confirm(`确认将这组 ${wraps.length} 项缓存全部${verb}？\n共 ${allPaths.length} 个路径${sizeStr}。`)) return;
+  postAction(secActions, allPaths, mode).then(res=>{
+    if(res.ok){
+      status.textContent = mode==='rm' ? `✓ 已删除 ${wraps.length} 项` : `✓ 已移 ${wraps.length} 项到回收站`;
+      status.className='del-status sec-status ok';
+      wraps.forEach(w=>{
+        const item=w.closest('.item'); item.classList.add('cleaned');
+        const badge=item.querySelector('.item-head .item-badge');
+        if(badge) badge.textContent = mode==='rm' ? '已删除' : '已移回收站';
+        const ist=w.querySelector('.del-status');
+        if(ist){ ist.textContent = mode==='rm'?'✓ 已删除':'✓ 已移到回收站'; ist.className='del-status ok'; }
+        w.querySelectorAll('.del-btn.trash,.del-btn.danger').forEach(b=>b.remove());
+      });
+      secActions.querySelectorAll('.del-btn').forEach(b=>b.remove());
+    } else { status.textContent='✗ '+(res.error||'失败'); status.className='del-status sec-status err'; }
+  });
+}
+
+function delBlock(it){
+  if(!DELETE || !it.trash_paths || !it.trash_paths.length) return '';
+  const payload = btoa(unescape(encodeURIComponent(JSON.stringify(it.trash_paths))));
+  // 非系统盘（D:/E: 等）：数据不可再生性高于系统盘缓存，只提供可逆的「移到回收站」，
+  // 不渲染「直接删除」按钮。服务端同样会清空 rm 白名单（纵深防御双保险）。
+  const nonSys = !!(DATA && DATA.non_system_drive);
+  const rmBtn = nonSys ? '' : '<button class="del-btn danger" onclick="doDelete(this,\'rm\')">直接删除</button>';
+  const note = nonSys
+    ? '<b>移到回收站</b>：可逆，删错能从回收站捞回。⚠️ 这是<b>非系统盘</b>（用户数据为主），'
+      + '因此<b>不提供直接删除</b>——工作资料、聊天记录等一旦硬删无法恢复。'
+      + '另注意：移到回收站<b>不会立即释放磁盘空间</b>，需清空回收站后才真正释放。'
+    : '<b>移到回收站</b>：可逆，删错能从回收站捞回，但要清空回收站才真正释放空间。'
+      + '<b>直接删除</b>：立即释放、不可恢复。绿灯都是可再生缓存，删了会自动重建。'
+      + '⚠️ 移到回收站<b>不会立即释放磁盘空间</b>，需清空回收站。';
+  return `<div class="field del-actions" data-paths="${payload}">
+    <div class="label">在网页上直接处理（${it.trash_paths.length} 个路径）</div>
+    <div class="del-row">
+      <button class="del-btn trash" onclick="doDelete(this,'trash')">移到回收站</button>
+      ${rmBtn}
+      <span class="del-status"></span>
+    </div>
+    <div class="del-note">${note}</div>
+  </div>`;
+}
+
+function postAction(wrap, paths, mode){
+  const status = wrap.querySelector('.del-status');
+  const btns = wrap.querySelectorAll('.del-btn');
+  status.textContent = '处理中…'; status.className='del-status';
+  btns.forEach(b=>b.disabled=true);
+  return fetch(DELETE.endpoint, {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:DELETE.token, paths, mode})})
+    .then(r=>r.json()).then(res=>{ btns.forEach(b=>b.disabled=false); return res; })
+    .catch(e=>{ btns.forEach(b=>b.disabled=false); return {ok:false, error:'连接失败：'+e}; });
+}
+
+function doDelete(btn, mode){
+  const wrap = btn.closest('.del-actions');
+  const paths = JSON.parse(decodeURIComponent(escape(atob(wrap.dataset.paths))));
+  const verb = mode==='rm' ? '直接删除（不可恢复）' : '移到回收站（可恢复）';
+  if(!confirm(`确认${verb}以下 ${paths.length} 个路径？\n\n`+paths.join('\n'))) return;
+  postAction(wrap, paths, mode).then(res=>{
+    const status = wrap.querySelector('.del-status');
+    if(res.ok){
+      status.textContent = mode==='rm' ? '✓ 已删除，空间已释放' : '✓ 已移到回收站（可恢复，清空后释放空间）';
+      status.className='del-status ok';
+      wrap.querySelectorAll('.del-btn.trash,.del-btn.danger').forEach(b=>b.remove());
+      const item = wrap.closest('.item');
+      if(item){
+        item.classList.add('cleaned');
+        const badge = item.querySelector('.item-head .item-badge');
+        if(badge) badge.textContent = mode==='rm' ? '已删除' : '已移回收站';
+      }
+    } else { status.textContent='✗ '+(res.error||'失败'); status.className='del-status err'; }
+  });
+}
+
+function doOpen(btn){
+  const wrap = btn.closest('.del-actions');
+  const paths = JSON.parse(decodeURIComponent(escape(atob(wrap.dataset.open))));
+  postAction(wrap, paths, 'open').then(res=>{
+    const status = wrap.querySelector('.del-status');
+    if(res.ok){ status.textContent='✓ 已在'+FM+'打开，自行审查删除'; status.className='del-status ok'; }
+    else { status.textContent='✗ '+(res.error||'失败'); status.className='del-status err'; }
+  });
+}
+
+const b64 = o => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+
+// 盘符标题：优先 target_drive，其次 system.disk_name，最后按磁盘名判断是否系统盘。
+// 不硬编码盘符——同一模板可能用于 C: / D: / E: 等任意盘。
+function diskLabel(){
+  const raw = (DATA.target_drive || (DATA.system && DATA.system.disk_name) || '').trim();
+  const name = raw.replace(/[:\\]+$/,'') || 'C:';
+  const nonSys = !!DATA.non_system_drive;
+  return name + (nonSys ? ' 盘（非系统盘）' : ' 盘（系统盘）');
+}
+function renderTitle(){
+  const label = diskLabel();
+  const el = document.getElementById('diskTitle');
+  if(el) el.textContent = `Windows ${label}存储分析报告`;
+  document.title = `Windows ${label}存储分析报告`;
+}
+
+// 时间维度摘要：从 trash_paths 附带的元信息里取最久未访问者（A8：报告需标注时间）
+function timeFacts(it){
+  const tp = it.time_facts;
+  if(!tp) return '';
+  const rows = [];
+  if(tp.newest_mtime) rows.push(`<div class="label">最近修改</div><div>${esc(tp.newest_mtime)}</div>`);
+  if(tp.oldest_atime_days != null) rows.push(`<div class="label">最久未访问</div><div><b>${tp.oldest_atime_days}</b> 天前（${esc(tp.oldest_atime||'')}）</div>`);
+  if(!rows.length) return '';
+  return `<div class="field time-facts">${rows.join('')}</div>`;
+}
+
+// 逐文件路径清单：解决「文件太零散、看不到具体路径」的问题。
+// 每行可单独勾选，支持「全选 / 反选 / 只选前N个」，再批量移回收站。
+function fileList(it){
+  const list = it.file_list;
+  if(!list || !list.length) return '';
+  const rows = list.map((f,i)=>{
+    const payload = btoa(unescape(encodeURIComponent(JSON.stringify([f.path]))));
+    const cb = DELETE ? `<label class="fl-check"><input type="checkbox" class="fl-cb" data-w="${payload}"> 选中</label>` : '';
+    return `<div class="fl-row">
+      <div class="fl-main">
+        <div class="fl-path" title="${esc(f.path)}">${esc(f.path)}</div>
+        <div class="fl-meta"><b>${esc(f.size||'')}</b> · 修改于 ${esc(f.mtime||'?')}${f.reason?' · '+esc(f.reason):''}</div>
+      </div>${cb}
+    </div>`;
+  }).join('');
+  const ctrl = DELETE ? `<div class="fl-ctrl">
+      <button class="fl-btn" onclick="flSelect(this,'all')">全选</button>
+      <button class="fl-btn" onclick="flSelect(this,'none')">清空</button>
+      <button class="fl-btn danger" onclick="flTrashChecked(this)">把选中的移到回收站</button>
+    </div>` : '';
+  return `<div class="field fl">
+    <div class="label">逐文件路径（${list.length} 个）</div>
+    ${ctrl}
+    <div class="fl-list">${rows}</div>
+  </div>`;
+}
+
+// 重复组清单：按组折叠，组内可单独选择
+function dupList(it){
+  const gs = it.dup_groups;
+  if(!gs || !gs.length) return '';
+  const body = gs.map((g,gi)=>{
+    const rows = g.files.map(f=>{
+      const payload = btoa(unescape(encodeURIComponent(JSON.stringify([f.path]))));
+      const cb = DELETE ? `<label class="fl-check"><input type="checkbox" class="fl-cb" data-w="${payload}"> 选中</label>` : '';
+      return `<div class="fl-row">
+        <div class="fl-main">
+          <div class="fl-path" title="${esc(f.path)}">${esc(f.path)}</div>
+          <div class="fl-meta"><b>${esc(f.size||'')}</b> · 修改于 ${esc(f.mtime||'?')}</div>
+        </div>${cb}
+      </div>`;
+    }).join('');
+    return `<div class="dup-group">
+      <div class="dup-head">第 ${gi+1} 组 · 每个 ${esc(g.size_h)} × ${g.count} 份 → 可回收 <b>${esc(g.reclaim)}</b></div>
+      <div class="fl-list">${rows}</div>
+    </div>`;
+  }).join('');
+  const ctrl = DELETE ? `<div class="fl-ctrl">
+      <button class="fl-btn" onclick="flSelect(this,'all')">全选</button>
+      <button class="fl-btn" onclick="flSelect(this,'none')">清空</button>
+      <button class="fl-btn danger" onclick="flTrashChecked(this)">把选中的移到回收站</button>
+    </div>` : '';
+  return `<div class="field fl">
+    <div class="label">按组查看（${gs.length} 组 / ${gs.reduce((a,g)=>a+g.count,0)} 个文件）</div>
+    ${ctrl}
+    ${body}
+  </div>`;
+}
+
+function flSelect(btn, mode){
+  const scope = btn.closest('.fl');
+  scope.querySelectorAll('.fl-cb').forEach(cb=>{
+    const row = cb.closest('.fl-row');
+    const dead = row && row.querySelector('.fl-path') &&
+      row.querySelector('.fl-path').textContent.indexOf('（已删除') >= 0;
+    cb.checked = (mode==='all' && !dead);
+    if(row) row.classList.toggle('picked', cb.checked);
+  });
+}
+
+function flTrashChecked(btn){
+  const scope = btn.closest('.fl');
+  const cbs = [...scope.querySelectorAll('.fl-cb:checked')];
+  if(!cbs.length){ alert('请先勾选要处理的文件'); return; }
+  const paths = cbs.map(cb=>JSON.parse(decodeURIComponent(escape(atob(cb.dataset.w))))[0]);
+  const total = paths.length;
+  if(!confirm(`确认把这 ${total} 个文件移到回收站？\n\n`+
+    paths.slice(0,20).join('\n') + (total>20?`\n…… 其余 ${total-20} 个略`:'') +
+    `\n\n⚠️ 移到回收站不会立即释放磁盘空间，需清空回收站才真正释放。`)) return;
+  const pathsPayload = btoa(unescape(encodeURIComponent(JSON.stringify(paths))));
+  postActionRaw(btn, pathsPayload, paths)
+    .then(res=>{
+      const status = scope.querySelector('.fl-status') || (()=>{const s=document.createElement('span');s.className='del-status fl-status';btn.parentNode.appendChild(s);return s;})();
+      if(res.ok){
+        status.textContent = `✓ 已移 ${total} 个到回收站`;
+        status.className='del-status fl-status ok';
+        paths.forEach(p=>{
+          cbs.forEach(cb=>{
+            if(JSON.parse(decodeURIComponent(escape(atob(cb.dataset.w))))[0]===p){
+              cb.checked=false; cb.closest('.fl-row').classList.add('cleaned');
+              cb.closest('.fl-row').querySelector('.fl-check').innerHTML='<span class="fl-done">已处理</span>';
+            }
+          });
+        });
+      } else { status.textContent='✗ '+(res.error||'失败'); status.className='del-status fl-status err'; }
+    });
+}
+
+// 复用既有 postAction，但需要自定义回调
+function postActionRaw(btn, payload, paths){
+  const status = document.createElement('span');
+  btn.disabled = true;
+  const old = btn.textContent; btn.textContent = '处理中…';
+  return fetch(DELETE.endpoint, {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:DELETE.token, paths, mode:'trash'})})
+    .then(r=>r.json())
+    .then(res=>{ btn.disabled=false; btn.textContent=old; return res; })
+    .catch(e=>{ btn.disabled=false; btn.textContent=old; return {ok:false,error:'连接失败：'+e}; });
+}
+
+function renderYellow(items){
+  if(!items||!items.length) return '';
+  const cards = items.map(it=>card('yellow', it.name, it.size, it.path,
+    timeFacts(it) +
+    dupList(it) +
+    fileList(it) +
+    `<div class="field"><div class="label">内容画像</div>${esc(it.content_profile)}</div>
+     <div class="field"><div class="label">为什么需要人工判断</div>${esc(it.why_manual)}</div>
+     <div class="field"><div class="label">处置路径</div>${esc(it.disposal)}</div>
+     <div class="risk">⚠️ ${esc(it.risk)}</div>` + yellowActions(it))).join('');
+  return section('🟡 需你参与的手动清理（含用户数据）', items.length, cards);
+}
+
+function yellowActions(it){
+  if(!DELETE) return '';
+  const hasTrash = it.trash_paths && it.trash_paths.length;
+  const trashBtn = hasTrash
+    ? `<button class="del-btn trash" onclick="doDelete(this,'trash')">移到回收站（仅安全部分）</button>` : '';
+  const trashNote = hasTrash
+    ? `<b>移到回收站（仅安全部分）</b>：只移这一项核实过可安全清理的子目录，可逆、需清空回收站才释放空间。` : '';
+  const openNote = it.open_note ? esc(it.open_note) : '';
+  return `<div class="field del-actions" data-paths="${hasTrash?b64(it.trash_paths):''}" data-open="${b64([it.path])}">
+    <div class="label">在网页上处理</div>
+    <div class="del-row">
+      <button class="del-btn open" onclick="doOpen(this)">在${FM}里打开</button>
+      ${trashBtn}
+      <span class="del-status"></span>
+    </div>
+    <div class="del-note"><b>在${FM}里打开</b>：只打开文件夹供你自己查看，不删任何东西。${trashNote}${openNote?'<br>'+openNote:''}</div>
+  </div>`;
+}
+
+function renderRed(items){
+  if(!items||!items.length) return '';
+  const cards = items.map(it=>card('red', it.name, it.size||'', it.path,
+    `<div class="field"><div class="label">为什么不建议手删</div>${esc(it.why_keep)}</div>
+     <div class="field"><div class="label">卸载 / 释放建议</div>${esc(it.indirect_release)}</div>
+     ${it.auto_reclaim?`<div class="field"><div class="label">是否自动回收</div>${esc(it.auto_reclaim)}</div>`:''}` + redActions(it))).join('');
+  return section('🔴 谨慎清理（建议走正规卸载，别手动删）', items.length, cards);
+}
+
+function redActions(it){
+  if(!DELETE || !it.app_paths || !it.app_paths.length) return '';
+  return `<div class="field del-actions" data-open="${b64(it.app_paths)}">
+    <div class="label">在网页上处理</div>
+    <div class="del-row">
+      <button class="del-btn open" onclick="doOpen(this)">在${FM}里打开（去卸载）</button>
+      <span class="del-status"></span>
+    </div>
+    <div class="del-note"><b>在${FM}里打开</b>：定位到该应用，你可以右键「卸载」或使用它自带的卸载器。应用在系统目录、可能需要管理员权限，由你手动操作更稳妥。</div>
+  </div>`;
+}
+
+function card(tier,name,size,path,inner){
+  return `<div class="item ${tier}">
+    <div class="item-head" onclick="this.parentNode.classList.toggle('open')">
+      <span class="dot ${tier}"></span>
+      <span class="item-name">${esc(name)}</span>
+      <span class="item-badge"></span>
+      ${size?`<span class="item-size">${esc(cleanSize(size))}</span>`:''}
+      <span class="chev">▶</span>
+    </div>
+    <div class="item-body">
+      <div class="item-path">${esc(path)}</div>
+      ${inner}
+    </div></div>`;
+}
+function section(title,count,inner,actions){
+  return `<div class="sec"><h2>${esc(title)} <span class="count">${count} 项</span>${actions||''}</h2>${inner}</div>`;
+}
+
+const sumList=a=>(a&&a.length)?`<ul>${a.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'';
+
+function renderPriority(sm){
+  if(!sm || (!sm.priority && !sm.overview)) return '';
+  const intro = sm.overview?`<p class="lead">${esc(sm.overview)}</p>`:'';
+  const body = sm.priority?(Array.isArray(sm.priority)?sumList(sm.priority):`<p>${esc(sm.priority)}</p>`):'';
+  return `<div class="sec"><h2>执行建议</h2><div class="summary">${intro}${body}</div></div>`;
+}
+
+function renderLongTerm(sm){
+  if(!sm || !sm.long_term || !sm.long_term.length) return '';
+  return `<div class="sec"><h2>长期优化建议</h2><div class="summary">${sumList(sm.long_term)}</div></div>`;
+}
+
+function renderCaveats(sm){
+  if(!sm || !sm.caveats || !sm.caveats.length) return '';
+  return `<div class="sec"><h2>⚠️ 清理前必读（风险提示）</h2><div class="summary warn">${sumList(sm.caveats)}</div></div>`;
+}
+
+function renderDenied(){
+  if(!DATA.denied||!DATA.denied.length) return '';
+  return `<div class="denied"><b>以下目录权限不足未能读取，可能遗漏体量：</b><br>${DATA.denied.map(esc).join('<br>')}</div>`;
+}
+
+const app=document.getElementById('app');
+renderTitle();
+app.innerHTML = renderSystem(DATA.system, DATA.summary)
+  + renderTop5(DATA.top5)
+  + renderPriority(DATA.summary)
+  + renderGreen(DATA.green)
+  + renderYellow(DATA.yellow)
+  + renderRed(DATA.red)
+  + renderDenied()
+  + renderLongTerm(DATA.summary)
+  + renderCaveats(DATA.summary);
+
+document.addEventListener('click', e=>{
+  const b=e.target.closest('.copy'); if(!b) return;
+  e.stopPropagation();
+  const text=decodeURIComponent(escape(atob(b.dataset.cmd)));
+  navigator.clipboard.writeText(text).then(()=>{
+    b.textContent='已复制'; b.classList.add('done');
+    setTimeout(()=>{b.textContent='复制';b.classList.remove('done');},1500);
+  });
+});
+</script>
+</body>
+</html>
